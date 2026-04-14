@@ -1,0 +1,1285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CodeSync – Collaborative Playground</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+  <!-- socket.io loaded from local server -->
+  <script src="/socket.io/socket.io.js" onerror="window._socketMissing=true"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0b0d14;
+      --surface:  #111420;
+      --panel:    #161929;
+      --border:   #252a40;
+      --accent:   #00e5a0;
+      --accent2:  #7c6fff;
+      --warn:     #ff6b6b;
+      --text:     #d8ddf0;
+      --muted:    #5a607a;
+      --font-ui:  'Syne', sans-serif;
+      --font-code:'JetBrains Mono', monospace;
+    }
+
+    html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font-ui); }
+
+    /* ── SPLASH ── */
+    #splash {
+      position: fixed; inset: 0; z-index: 100;
+      background: var(--bg);
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 32px;
+    }
+    #splash h1 {
+      font-size: clamp(2.4rem, 6vw, 4rem);
+      font-weight: 800;
+      letter-spacing: -1px;
+      background: linear-gradient(120deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    #splash p { color: var(--muted); font-size: .95rem; letter-spacing: .5px; }
+    .splash-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 36px 40px;
+      width: min(420px, 90vw);
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .splash-card label { font-size: .8rem; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; display: block; }
+    .splash-card input, .splash-card select {
+      width: 100%; padding: 11px 14px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); font-family: var(--font-ui);
+      font-size: .95rem; outline: none; transition: border-color .2s;
+    }
+    .splash-card input:focus, .splash-card select:focus { border-color: var(--accent); }
+    .room-row { display: flex; gap: 10px; }
+    .room-row input { flex: 1; }
+    .btn-gen {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; padding: 0 14px; color: var(--muted);
+      cursor: pointer; font-size: .8rem; font-family: var(--font-ui);
+      white-space: nowrap; transition: color .2s, border-color .2s;
+    }
+    .btn-gen:hover { color: var(--accent); border-color: var(--accent); }
+    .divider { height: 1px; background: var(--border); margin: 4px 0; }
+    .btn-join {
+      background: var(--accent); color: #000; font-family: var(--font-ui);
+      font-weight: 700; font-size: 1rem; border: none;
+      border-radius: 8px; padding: 13px; cursor: pointer;
+      letter-spacing: .5px; transition: opacity .2s, transform .1s;
+    }
+    .btn-join:hover { opacity: .88; transform: translateY(-1px); }
+    .btn-join:active { transform: translateY(0); }
+
+    /* ── APP SHELL ── */
+    #app { display: none; flex-direction: column; height: 100vh; }
+
+    /* ── TOPBAR ── */
+    #topbar {
+      display: flex; align-items: center; gap: 16px;
+      padding: 0 20px; height: 54px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .logo { font-weight: 800; font-size: 1.1rem; background: linear-gradient(120deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
+    .room-badge {
+      background: var(--panel); border: 1px solid var(--border);
+      padding: 4px 12px; border-radius: 20px;
+      font-size: .78rem; font-family: var(--font-code); color: var(--muted);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .room-badge span { color: var(--text); }
+    .copy-btn {
+      background: none; border: none; cursor: pointer;
+      color: var(--muted); font-size: .75rem; font-family: var(--font-ui);
+      padding: 2px 6px; border-radius: 4px; transition: color .2s, background .2s;
+    }
+    .copy-btn:hover { color: var(--accent); background: rgba(0,229,160,.08); }
+    .spacer { flex: 1; }
+    #lang-select {
+      background: var(--panel); border: 1px solid var(--border);
+      color: var(--text); font-family: var(--font-ui); font-size: .85rem;
+      padding: 5px 10px; border-radius: 8px; outline: none; cursor: pointer;
+    }
+    #run-btn {
+      background: var(--accent); color: #000; border: none;
+      padding: 7px 20px; border-radius: 8px; font-family: var(--font-ui);
+      font-weight: 700; font-size: .9rem; cursor: pointer;
+      display: flex; align-items: center; gap: 8px;
+      transition: opacity .2s, transform .1s;
+    }
+    #run-btn:hover { opacity: .88; }
+    #run-btn:active { transform: scale(.97); }
+    #run-btn.loading { opacity: .6; pointer-events: none; }
+    #run-btn svg { width: 14px; height: 14px; }
+    #clear-btn {
+      background: transparent; border: 1px solid var(--border);
+      color: var(--muted); padding: 6px 14px; border-radius: 8px;
+      font-family: var(--font-ui); font-size: .85rem; cursor: pointer;
+      transition: color .2s, border-color .2s;
+    }
+    #clear-btn:hover { color: var(--warn); border-color: var(--warn); }
+    #save-btn:hover { color: var(--accent) !important; border-color: var(--accent) !important; }
+
+    /* ── USERS STRIP ── */
+    #users-strip {
+      display: flex; align-items: center; gap: 8px;
+      padding: 0 20px; height: 38px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg); flex-shrink: 0; overflow-x: auto;
+    }
+    .users-label { font-size: .72rem; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; margin-right: 4px; }
+    .user-pill {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--panel); border: 1px solid var(--border);
+      padding: 3px 10px 3px 6px; border-radius: 20px;
+      font-size: .78rem; white-space: nowrap; animation: pill-in .3s ease;
+    }
+    @keyframes pill-in { from { opacity:0; transform: scale(.8); } to { opacity:1; transform: scale(1); } }
+    .user-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); margin-left: auto; }
+
+    /* ── MAIN LAYOUT ── */
+    #main { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── EDITOR ── */
+    #editor-wrap {
+      flex: 1; display: flex; flex-direction: column; overflow: hidden;
+      border-right: 1px solid var(--border);
+      position: relative;
+    }
+    .editor-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      font-size: .78rem; color: var(--muted);
+      flex-shrink: 0;
+    }
+    /* ── FILE TABS ── */
+    #file-tabs-bar {
+      display: flex; align-items: center; gap: 0;
+      padding: 0 8px; overflow-x: auto; overflow-y: hidden;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface); flex-shrink: 0;
+      min-height: 38px;
+    }
+    #file-tabs-bar::-webkit-scrollbar { height: 3px; }
+    .file-tab {
+      display: flex; align-items: center; gap: 6px;
+      padding: 0 12px; height: 38px;
+      border-right: 1px solid var(--border);
+      font-family: var(--font-code); font-size: .78rem;
+      color: var(--muted); cursor: pointer; white-space: nowrap;
+      position: relative; transition: color .15s, background .15s;
+      user-select: none; flex-shrink: 0;
+    }
+    .file-tab:hover { color: var(--text); background: rgba(255,255,255,.03); }
+    .file-tab.active {
+      color: var(--accent); background: var(--bg);
+      border-bottom: 2px solid var(--accent);
+    }
+    .file-tab .tab-name {
+      outline: none; background: transparent; border: none;
+      font-family: var(--font-code); font-size: .78rem;
+      color: inherit; min-width: 30px; max-width: 120px;
+    }
+    .file-tab .tab-close {
+      width: 16px; height: 16px; border-radius: 3px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .7rem; color: var(--muted); opacity: 0;
+      transition: opacity .15s, background .15s, color .15s;
+      flex-shrink: 0;
+    }
+    .file-tab:hover .tab-close,
+    .file-tab.active .tab-close { opacity: 1; }
+    .file-tab .tab-close:hover { background: rgba(255,107,107,.18); color: var(--warn); }
+    .btn-new-file {
+      flex-shrink: 0; padding: 0 10px; height: 38px;
+      background: none; border: none; color: var(--muted);
+      font-size: 1.1rem; cursor: pointer; font-family: var(--font-ui);
+      transition: color .15s;
+    }
+    .btn-new-file:hover { color: var(--accent); }
+    .tab {
+      padding: 3px 12px; border-radius: 4px;
+      background: var(--panel); border: 1px solid var(--border);
+      font-family: var(--font-code); font-size: .78rem;
+      color: var(--accent);
+    }
+    #editor-container { flex: 1; overflow: hidden; }
+    .CodeMirror {
+      height: 100% !important;
+      font-family: var(--font-code) !important;
+      font-size: 14px !important;
+      line-height: 1.7 !important;
+      background: var(--bg) !important;
+    }
+    .CodeMirror-scroll { padding-bottom: 40px; }
+
+    /* ── TYPING INDICATOR ── */
+    #typing-bar {
+      height: 24px; padding: 0 16px; font-size: .75rem; color: var(--muted);
+      display: flex; align-items: center; gap: 6px;
+      border-top: 1px solid var(--border); background: var(--bg);
+      flex-shrink: 0;
+    }
+    .typing-dots span {
+      display: inline-block; width: 4px; height: 4px; border-radius: 50%;
+      background: var(--accent); margin: 0 1px;
+      animation: bounce .9s infinite;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: .15s; }
+    .typing-dots span:nth-child(3) { animation-delay: .3s; }
+    @keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-4px)} }
+
+    /* ── RIGHT PANEL ── */
+    #right-panel { width: 360px; display: flex; flex-direction: column; flex-shrink: 0; }
+
+    /* ── OUTPUT ── */
+    #output-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; border-bottom: 1px solid var(--border); }
+    .panel-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 16px; border-bottom: 1px solid var(--border);
+      background: var(--surface); flex-shrink: 0; font-size: .78rem; color: var(--muted);
+    }
+    .panel-header strong { color: var(--text); font-weight: 600; }
+    #output-box {
+      flex: 1; overflow-y: auto; padding: 16px;
+      font-family: var(--font-code); font-size: .82rem; line-height: 1.7;
+      background: var(--bg); white-space: pre-wrap; word-break: break-all;
+    }
+    #output-box:empty::before { content: "Output will appear here…"; color: var(--muted); }
+    .out-success { color: #a8ffcb; }
+    .out-error   { color: var(--warn); }
+    .out-info    { color: var(--accent2); }
+    .status-badge {
+      margin-left: auto; padding: 2px 9px; border-radius: 20px;
+      font-size: .72rem; font-weight: 600;
+    }
+    .status-badge.ok  { background: rgba(0,229,160,.12); color: var(--accent); }
+    .status-badge.err { background: rgba(255,107,107,.12); color: var(--warn); }
+    .status-badge.run { background: rgba(124,111,255,.12); color: var(--accent2); }
+
+    /* ── CHAT ── */
+    #chat-panel { display: flex; flex-direction: column; height: 220px; flex-shrink: 0; }
+    #chat-messages {
+      flex: 1; overflow-y: auto; padding: 12px 16px;
+      display: flex; flex-direction: column; gap: 8px;
+      background: var(--bg);
+    }
+    .msg { display: flex; flex-direction: column; gap: 2px; animation: msg-in .2s ease; }
+    @keyframes msg-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+    .msg-meta { font-size: .7rem; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+    .msg-name { font-weight: 600; }
+    .msg-time { opacity: .6; }
+    .msg-body { font-size: .83rem; line-height: 1.5; }
+    .msg-body code { font-family: var(--font-code); background: var(--panel); padding: 1px 5px; border-radius: 3px; }
+    #chat-input-row {
+      display: flex; gap: 0; border-top: 1px solid var(--border);
+      background: var(--surface);
+    }
+    #chat-input {
+      flex: 1; background: transparent; border: none; outline: none;
+      padding: 12px 16px; font-family: var(--font-ui); font-size: .88rem;
+      color: var(--text);
+    }
+    #chat-input::placeholder { color: var(--muted); }
+    #send-btn {
+      background: none; border: none; border-left: 1px solid var(--border);
+      padding: 0 16px; cursor: pointer; color: var(--muted);
+      font-size: 1rem; transition: color .2s;
+    }
+    #send-btn:hover { color: var(--accent); }
+
+    /* scrollbars */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+    /* notification toast */
+    #toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+      background: var(--surface); border: 1px solid var(--border);
+      padding: 10px 20px; border-radius: 8px; font-size: .85rem;
+      opacity: 0; transition: opacity .3s, transform .3s; pointer-events: none; z-index: 200;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ── STDIN SECTION ── */
+    #stdin-area {
+      border-top: 1px solid var(--border);
+      background: var(--surface); flex-shrink: 0;
+    }
+    #stdin-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 16px; font-size: .75rem; color: var(--muted); cursor: pointer;
+    }
+    #stdin-header:hover { color: var(--text); }
+    #stdin-box {
+      display: none;
+      padding: 0 16px 10px;
+    }
+    #stdin-input {
+      width: 100%; background: var(--panel); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); font-family: var(--font-code);
+      font-size: .8rem; padding: 8px 10px; resize: none; outline: none;
+      transition: border-color .2s;
+    }
+    #stdin-input:focus { border-color: var(--accent); }
+
+    /* ── SAVE MODAL ── */
+    #save-modal-overlay {
+      position: fixed; inset: 0; z-index: 300;
+      background: rgba(0,0,0,.65); backdrop-filter: blur(4px);
+      display: none; align-items: center; justify-content: center;
+    }
+    #save-modal-overlay.open { display: flex; }
+    #save-modal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 32px 36px; width: min(460px, 92vw);
+      display: flex; flex-direction: column; gap: 20px;
+      animation: modal-in .2s ease;
+    }
+    @keyframes modal-in { from { opacity:0; transform: scale(.95) translateY(8px); } to { opacity:1; transform: none; } }
+    #save-modal h2 {
+      font-size: 1.15rem; font-weight: 700; letter-spacing: -.3px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    #save-modal h2 svg { color: var(--accent); }
+    .save-file-select {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); font-family: var(--font-ui);
+      font-size: .88rem; padding: 8px 12px; outline: none; width: 100%;
+      transition: border-color .2s;
+    }
+    .save-file-select:focus { border-color: var(--accent); }
+    .save-options { display: flex; flex-direction: column; gap: 10px; }
+    .save-option-btn {
+      display: flex; align-items: center; gap: 14px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px 16px; cursor: pointer;
+      transition: border-color .2s, background .2s; text-align: left;
+      width: 100%;
+    }
+    .save-option-btn:hover { border-color: var(--accent); background: rgba(0,229,160,.05); }
+    .save-option-btn.drive:hover { border-color: #4285f4; background: rgba(66,133,244,.07); }
+    .save-option-btn.email:hover { border-color: var(--accent2); background: rgba(124,111,255,.07); }
+    .save-option-icon {
+      width: 38px; height: 38px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-size: 1.1rem;
+    }
+    .save-option-btn.download .save-option-icon { background: rgba(0,229,160,.12); color: var(--accent); }
+    .save-option-btn.drive    .save-option-icon { background: rgba(66,133,244,.12); color: #4285f4; }
+    .save-option-btn.email    .save-option-icon { background: rgba(124,111,255,.12); color: var(--accent2); }
+    .save-option-text strong { display: block; font-size: .9rem; margin-bottom: 2px; }
+    .save-option-text span { font-size: .77rem; color: var(--muted); }
+    .save-modal-close {
+      background: none; border: none; color: var(--muted); cursor: pointer;
+      font-size: 1.2rem; margin-left: auto; line-height: 1;
+      transition: color .2s; padding: 0 4px;
+    }
+    .save-modal-close:hover { color: var(--warn); }
+    /* Email sub-form */
+    #email-sub-form {
+      display: none; flex-direction: column; gap: 10px;
+      border-top: 1px solid var(--border); padding-top: 14px;
+    }
+    #email-sub-form.open { display: flex; }
+    #email-sub-form label { font-size: .78rem; color: var(--muted); letter-spacing: .8px; text-transform: uppercase; }
+    #email-to-input, #email-subject-input {
+      width: 100%; padding: 9px 12px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); font-family: var(--font-ui);
+      font-size: .88rem; outline: none; transition: border-color .2s;
+    }
+    #email-to-input:focus, #email-subject-input:focus { border-color: var(--accent2); }
+    #email-send-btn {
+      background: var(--accent2); color: #fff; font-family: var(--font-ui);
+      font-weight: 700; font-size: .88rem; border: none;
+      border-radius: 8px; padding: 10px; cursor: pointer;
+      transition: opacity .2s;
+    }
+    #email-send-btn:hover { opacity: .85; }
+    /* Drive sub-form */
+    #drive-sub-form {
+      display: none; flex-direction: column; gap: 10px;
+      border-top: 1px solid var(--border); padding-top: 14px;
+    }
+    #drive-sub-form.open { display: flex; }
+    #drive-sub-form p { font-size: .82rem; color: var(--muted); line-height: 1.5; }
+    #drive-connect-btn {
+      background: #4285f4; color: #fff; font-family: var(--font-ui);
+      font-weight: 700; font-size: .88rem; border: none;
+      border-radius: 8px; padding: 10px 16px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      transition: opacity .2s;
+    }
+    #drive-connect-btn:hover { opacity: .88; }
+  </style>
+</head>
+<body>
+
+<!-- ── SPLASH ── -->
+<div id="splash">
+  <div style="text-align:center">
+    <h1>Livscriptz</h1>
+    <p>Real-time collaborative code playground</p>
+  </div>
+  <div class="splash-card">
+    <div>
+      <label>Your Name</label>
+      <input id="name-input" placeholder="e.g. Alice" maxlength="24"/>
+    </div>
+    <div>
+      <label>Room ID</label>
+      <div class="room-row">
+        <input id="room-input" placeholder="Enter or generate a room ID"/>
+        <button class="btn-gen" onclick="genRoom()">Generate</button>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <button class="btn-join" onclick="joinRoom()">Join Room →</button>
+  </div>
+</div>
+
+<!-- ── APP ── -->
+<div id="app">
+  <!-- TOPBAR -->
+  <div id="topbar">
+    <div class="logo">LivScriptz</div>
+    <div class="room-badge">
+      Room: <span id="room-label"></span>
+      <button class="copy-btn" onclick="copyRoom()">copy</button>
+    </div>
+    <div class="spacer"></div>
+    <select id="lang-select" onchange="changeLang()">
+      <option value="javascript">JavaScript</option>
+      <option value="python">Python</option>
+      <option value="cpp">C++</option>
+      <option value="java">Java</option>
+      <option value="c">C</option>
+    </select>
+    <div id="stdin-toggle" onclick="toggleStdin()" style="cursor:pointer;font-size:.8rem;color:var(--muted);padding:4px 8px;border-radius:6px;border:1px solid var(--border);">stdin</div>
+    <button id="clear-btn" onclick="clearOutput()">Clear</button>
+    <button id="save-btn" onclick="openSaveModal()" title="Save / Export code" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:6px 14px;border-radius:8px;font-family:var(--font-ui);font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:6px;transition:color .2s,border-color .2s;">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2a2 2 0 0 1 2-2h8l2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2zm5 9.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM4 1v3h5V1H4z"/></svg>
+      Save
+    </button>
+    <button id="run-btn" onclick="runCode()">
+      <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 2l10 6-10 6V2z"/></svg>
+      Run
+    </button>
+  </div>
+
+  <!-- USERS -->
+  <div id="users-strip">
+    <span class="users-label">Online</span>
+    <div id="users-list"></div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+      <div class="status-dot" id="conn-dot"></div>
+      <span style="font-size:.72rem;color:var(--muted)" id="conn-label">connected</span>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div id="main">
+    <!-- EDITOR -->
+    <div id="editor-wrap">
+      <div id="file-tabs-bar">
+        <!-- tabs rendered by JS -->
+        <button class="btn-new-file" onclick="addFile()" title="New file">＋</button>
+      </div>
+      <div id="editor-container"></div>
+      <div id="stdin-area">
+        <div id="stdin-header" onclick="toggleStdin()">▸ stdin (optional)</div>
+        <div id="stdin-box">
+          <textarea id="stdin-input" rows="3" placeholder="Provide input for your program…"></textarea>
+        </div>
+      </div>
+      <div id="typing-bar"><span id="typing-text"></span></div>
+    </div>
+
+    <!-- RIGHT PANEL -->
+    <div id="right-panel">
+      <!-- OUTPUT -->
+      <div id="output-panel">
+        <div class="panel-header">
+          <strong>Output</strong>
+          <span class="status-badge" id="status-badge"></span>
+        </div>
+        <div id="output-box"></div>
+      </div>
+      <!-- CHAT -->
+      <div id="chat-panel">
+        <div class="panel-header" style="border-bottom:1px solid var(--border)">
+          <strong>Chat</strong>
+        </div>
+        <div id="chat-messages"></div>
+        <div id="chat-input-row">
+          <input id="chat-input" placeholder="Message…" onkeydown="chatKey(event)"/>
+          <button id="send-btn" onclick="sendChat()">↑</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── SAVE MODAL ── -->
+<div id="save-modal-overlay" onclick="closeSaveModalOutside(event)">
+  <div id="save-modal">
+    <h2>
+      <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2a2 2 0 0 1 2-2h8l2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2zm5 9.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM4 1v3h5V1H4z"/></svg>
+      Save / Export Code
+      <button class="save-modal-close" onclick="closeSaveModal()">✕</button>
+    </h2>
+
+    <!-- File picker -->
+    <div>
+      <label style="font-size:.78rem;color:var(--muted);letter-spacing:.8px;text-transform:uppercase;display:block;margin-bottom:6px;">File to save</label>
+      <select id="save-file-picker" class="save-file-select"></select>
+    </div>
+
+    <!-- Three options -->
+    <div class="save-options">
+      <!-- 1. Download -->
+      <button class="save-option-btn download" onclick="downloadFile()">
+        <div class="save-option-icon">
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>
+        </div>
+        <div class="save-option-text">
+          <strong>Download / Save to device</strong>
+          <span>Save the file directly to your computer</span>
+        </div>
+      </button>
+
+      <!-- 2. Google Drive -->
+      <button class="save-option-btn drive" onclick="toggleDriveForm()">
+        <div class="save-option-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6.28 3l5.72 9.9L6.72 21H2l5.72-9.9L2 3h4.28zm5.44 0h4.28l5.72 18h-4.28L11.72 3zm4.28 0L16 12.1 10.28 21H6l5.72-9.9L16 3z"/></svg>
+        </div>
+        <div class="save-option-text">
+          <strong>Upload to Google Drive</strong>
+          <span>Save directly to your Drive account</span>
+        </div>
+      </button>
+      <div id="drive-sub-form">
+        <p>Click below to sign in with Google and upload your file to Drive. You'll be redirected to the Google auth page.</p>
+        <button id="drive-connect-btn" onclick="uploadToDrive()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6.28 3l5.72 9.9L6.72 21H2l5.72-9.9L2 3h4.28zm5.44 0h4.28l5.72 18h-4.28L11.72 3zm4.28 0L16 12.1 10.28 21H6l5.72-9.9L16 3z"/></svg>
+          Sign in & Upload to Drive
+        </button>
+      </div>
+
+      <!-- 3. Email -->
+      <button class="save-option-btn email" onclick="toggleEmailForm()">
+        <div class="save-option-icon">
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V4zm2-1a1 1 0 0 0-1 1v.217l7 4.2 7-4.2V4a1 1 0 0 0-1-1H2zm13 2.383-4.708 2.825L15 11.105V5.383zm-.034 6.876-5.64-3.471L8 9.583l-1.326-.795-5.64 3.47A1 1 0 0 0 2 13h12a1 1 0 0 0 .966-.741zM1 11.105l4.708-2.897L1 5.383v5.722z"/></svg>
+        </div>
+        <div class="save-option-text">
+          <strong>Send via Email</strong>
+          <span>Open your email client with the code attached</span>
+        </div>
+      </button>
+      <div id="email-sub-form">
+        <label>Recipient Email</label>
+        <input id="email-to-input" type="email" placeholder="colleague@example.com"/>
+        <label>Subject</label>
+        <input id="email-subject-input" type="text" placeholder="e.g. main.py from LivScriptz"/>
+        <button id="email-send-btn" onclick="sendViaEmail()">Open in Email Client →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ════════════════════════════════════════
+   STATE
+════════════════════════════════════════ */
+let socket, editor, myName, myRoom, myColor;
+let suppressSync = false;
+let typingTimer;
+let users = {}; // socketId -> { name, color }
+const JUDGE0_URL = 'http://localhost:2358'; // local Judge0
+
+// ── MULTI-FILE STATE ──
+let files = [];        // [{ id, name, lang, content }]
+let activeFileId = null;
+let fileCounter = 0;
+
+function newFileId() { return 'f' + (++fileCounter); }
+
+const LANG_MAP = {
+  javascript: { id: 63, file: 'main.js',  mode: 'javascript' },
+  python:     { id: 71, file: 'main.py',  mode: 'python' },
+  cpp:        { id: 54, file: 'main.cpp', mode: 'text/x-c++src' },
+  java:       { id: 62, file: 'Main.java',mode: 'text/x-java' },
+  c:          { id: 50, file: 'main.c',   mode: 'text/x-csrc' },
+};
+
+const STARTER = {
+  javascript: `// Welcome to CodeSync!\nfunction greet(name) {\n  return \`Hello, \${name}!\`;\n}\nconsole.log(greet("World"));`,
+  python:     `# Welcome to CodeSync!\ndef greet(name):\n    return f"Hello, {name}!"\n\nprint(greet("World"))`,
+  cpp:        `#include <iostream>\nusing namespace std;\n\nint main() {\n    cout << "Hello, World!" << endl;\n    return 0;\n}`,
+  java:       `public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello, World!");\n    }\n}`,
+  c:          `#include <stdio.h>\n\nint main() {\n    printf("Hello, World!\\n");\n    return 0;\n}`,
+};
+
+const COLORS = ['#00e5a0','#7c6fff','#ff6b6b','#ffd166','#06d6a0','#ef8a17','#a8dadc','#f72585'];
+let colorIdx = 0;
+
+/* ════════════════════════════════════════
+   SPLASH
+════════════════════════════════════════ */
+function genRoom() {
+  const id = Math.random().toString(36).slice(2,8).toUpperCase();
+  document.getElementById('room-input').value = id;
+}
+
+function joinRoom() {
+  myName = document.getElementById('name-input').value.trim();
+  myRoom = document.getElementById('room-input').value.trim();
+  if (!myName) return toast('Enter your name');
+  if (!myRoom) return toast('Enter a room ID');
+  myColor = COLORS[colorIdx++ % COLORS.length];
+  document.getElementById('splash').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  initEditor();
+  initSocket();
+}
+
+/* ════════════════════════════════════════
+   EDITOR + FILE SYSTEM
+════════════════════════════════════════ */
+function initEditor() {
+  editor = CodeMirror(document.getElementById('editor-container'), {
+    value: '',
+    mode: 'javascript',
+    theme: 'dracula',
+    lineNumbers: true,
+    autoCloseBrackets: true,
+    matchBrackets: true,
+    tabSize: 2,
+    indentWithTabs: false,
+    lineWrapping: false,
+    extraKeys: { 'Ctrl-Enter': runCode, 'Cmd-Enter': runCode },
+  });
+  editor.on('change', (_, change) => {
+    if (suppressSync) return;
+    const f = activeFile();
+    if (f) f.content = editor.getValue();
+    if (!socket) return;
+    socket.emit('code-change', { room: myRoom, change, code: editor.getValue(), fileId: activeFileId });
+    notifyTyping();
+  });
+  // Create first default file
+  addFile(null, true);
+}
+
+function activeFile() { return files.find(f => f.id === activeFileId); }
+
+function addFile(opts, silent) {
+  const lang = (opts && opts.lang) || document.getElementById('lang-select').value || 'javascript';
+  const id = (opts && opts.id) || newFileId();
+  const name = (opts && opts.name) || LANG_MAP[lang].file.replace(/(\.\w+)$/, files.filter(f=>f.lang===lang).length ? `_${files.filter(f=>f.lang===lang).length}$1` : '$1');
+  const content = (opts && opts.content != null) ? opts.content : STARTER[lang];
+  const file = { id, name, lang, content };
+  files.push(file);
+  renderTabs();
+  switchFile(id, silent);
+  if (!silent && socket) socket.emit('file-added', { room: myRoom, file });
+}
+
+function switchFile(id, silent) {
+  // save current
+  const cur = activeFile();
+  if (cur && editor) cur.content = editor.getValue();
+
+  activeFileId = id;
+  const f = activeFile();
+  if (!f) return;
+
+  suppressSync = true;
+  editor.setValue(f.content);
+  editor.setOption('mode', LANG_MAP[f.lang].mode);
+  document.getElementById('lang-select').value = f.lang;
+  suppressSync = false;
+  renderTabs();
+  if (!silent && socket) socket.emit('file-switched', { room: myRoom, fileId: id });
+}
+
+function removeFile(id, e) {
+  e.stopPropagation();
+  if (files.length === 1) return toast('Cannot close last file');
+  const idx = files.findIndex(f => f.id === id);
+  files.splice(idx, 1);
+  if (activeFileId === id) {
+    const next = files[Math.min(idx, files.length - 1)];
+    switchFile(next.id, true);
+  }
+  renderTabs();
+  if (socket) socket.emit('file-removed', { room: myRoom, fileId: id });
+}
+
+function renameFile(id, newName) {
+  const f = files.find(f => f.id === id);
+  if (f) {
+    f.name = newName || f.name;
+    if (socket) socket.emit('file-renamed', { room: myRoom, fileId: id, name: f.name });
+  }
+}
+
+function renderTabs() {
+  const bar = document.getElementById('file-tabs-bar');
+  // Remove existing tabs (not the + button)
+  bar.querySelectorAll('.file-tab').forEach(el => el.remove());
+  const addBtn = bar.querySelector('.btn-new-file');
+
+  files.forEach(f => {
+    const tab = document.createElement('div');
+    tab.className = 'file-tab' + (f.id === activeFileId ? ' active' : '');
+    tab.dataset.id = f.id;
+
+    const nameEl = document.createElement('input');
+    nameEl.className = 'tab-name';
+    nameEl.value = f.name;
+    nameEl.title = 'Double-click to rename';
+    nameEl.readOnly = true;
+    nameEl.style.cursor = 'pointer';
+    nameEl.addEventListener('click', () => { if (f.id !== activeFileId) switchFile(f.id); });
+    nameEl.addEventListener('dblclick', () => {
+      nameEl.readOnly = false;
+      nameEl.style.cursor = 'text';
+      nameEl.select();
+    });
+    nameEl.addEventListener('blur', () => {
+      nameEl.readOnly = true;
+      nameEl.style.cursor = 'pointer';
+      renameFile(f.id, nameEl.value.trim() || f.name);
+      nameEl.value = f.name;
+    });
+    nameEl.addEventListener('keydown', e => { if (e.key === 'Enter') nameEl.blur(); e.stopPropagation(); });
+
+    const closeBtn = document.createElement('span');
+    closeBtn.className = 'tab-close';
+    closeBtn.innerHTML = '✕';
+    closeBtn.addEventListener('click', (e) => removeFile(f.id, e));
+
+    tab.appendChild(nameEl);
+    tab.appendChild(closeBtn);
+    tab.addEventListener('click', () => switchFile(f.id));
+    bar.insertBefore(tab, addBtn);
+  });
+}
+
+function changeLang() {
+  const lang = document.getElementById('lang-select').value;
+  const f = activeFile();
+  if (!f) return;
+  f.lang = lang;
+  // Update name extension
+  const ext = LANG_MAP[lang].file.match(/\.\w+$/)[0];
+  f.name = f.name.replace(/\.\w+$/, ext);
+  editor.setOption('mode', LANG_MAP[lang].mode);
+  renderTabs();
+  if (socket) socket.emit('lang-change', { room: myRoom, lang, fileId: activeFileId, fileName: f.name });
+}
+
+/* ════════════════════════════════════════
+   SOCKET
+════════════════════════════════════════ */
+function initSocket() {
+  if (window._socketMissing) {
+    setConnStatus(false);
+    toast('Socket.io not found – running in offline mode');
+    return;
+  }
+  socket = io({ transports: ['websocket'] });
+
+  socket.on('connect', () => {
+    setConnStatus(true);
+    socket.emit('join', { room: myRoom, name: myName, color: myColor });
+  });
+
+  socket.on('disconnect', () => setConnStatus(false));
+
+  socket.on('room-state', ({ code, lang, users: serverUsers, files: serverFiles }) => {
+    // restore users
+    users = {};
+    serverUsers.forEach(u => { users[u.id] = u; });
+    renderUsers();
+    // restore files if available
+    if (serverFiles && serverFiles.length) {
+      files = [];
+      serverFiles.forEach(f => {
+        files.push({ id: f.id, name: f.name, lang: f.lang, content: f.content });
+        fileCounter = Math.max(fileCounter, parseInt(f.id.replace('f',''))||0);
+      });
+      activeFileId = files[0].id;
+      renderTabs();
+      switchFile(activeFileId, true);
+    } else {
+      // legacy: restore lang + code into active file
+      if (lang && lang !== document.getElementById('lang-select').value) {
+        const f = activeFile();
+        if (f) { f.lang = lang; document.getElementById('lang-select').value = lang; }
+        editor.setOption('mode', LANG_MAP[lang].mode);
+      }
+      if (code) {
+        const f = activeFile();
+        if (f) f.content = code;
+        suppressSync = true;
+        editor.setValue(code);
+        suppressSync = false;
+      }
+    }
+  });
+
+  socket.on('user-joined', ({ id, name, color }) => {
+    users[id] = { name, color };
+    renderUsers();
+    appendChat({ system: true, text: `${name} joined the room` });
+  });
+
+  socket.on('user-left', ({ id, name }) => {
+    delete users[id];
+    renderUsers();
+    appendChat({ system: true, text: `${name} left the room` });
+  });
+
+  socket.on('code-change', ({ change, code, fileId }) => {
+    const f = files.find(f => f.id === fileId);
+    if (f) f.content = code;
+    if (fileId === activeFileId) {
+      suppressSync = true;
+      editor.setValue(code);
+      suppressSync = false;
+    }
+  });
+
+  socket.on('file-added', ({ file }) => {
+    if (!files.find(f => f.id === file.id)) {
+      files.push(file);
+      fileCounter = Math.max(fileCounter, parseInt(file.id.replace('f',''))||0);
+      renderTabs();
+      toast(`${file.name} added by collaborator`);
+    }
+  });
+
+  socket.on('file-removed', ({ fileId }) => {
+    const idx = files.findIndex(f => f.id === fileId);
+    if (idx === -1) return;
+    files.splice(idx, 1);
+    if (activeFileId === fileId && files.length) switchFile(files[Math.min(idx, files.length-1)].id, true);
+    renderTabs();
+  });
+
+  socket.on('file-renamed', ({ fileId, name }) => {
+    const f = files.find(f => f.id === fileId);
+    if (f) { f.name = name; renderTabs(); }
+  });
+
+  socket.on('file-switched', ({ fileId }) => {
+    // just acknowledge, local state stays independent
+  });
+
+  socket.on('lang-change', ({ lang, fileId, fileName }) => {
+    const f = files.find(f => f.id === fileId);
+    if (f) {
+      f.lang = lang;
+      if (fileName) f.name = fileName;
+    }
+    if (fileId === activeFileId || !fileId) {
+      document.getElementById('lang-select').value = lang;
+      editor.setOption('mode', LANG_MAP[lang].mode);
+    }
+    renderTabs();
+  });
+
+  socket.on('chat-message', ({ name, color, text, time }) => {
+    appendChat({ name, color, text, time });
+  });
+
+  socket.on('typing', ({ name }) => {
+    document.getElementById('typing-text').innerHTML =
+      `<span style="color:var(--accent)">${name}</span> is typing
+      <span class="typing-dots"><span></span><span></span><span></span></span>`;
+    clearTimeout(window._clearTyping);
+    window._clearTyping = setTimeout(() => {
+      document.getElementById('typing-text').innerHTML = '';
+    }, 2000);
+  });
+
+  socket.on('run-output', ({ output, error, time, status }) => {
+    displayOutput(output, error, time, status);
+  });
+}
+
+function setConnStatus(ok) {
+  document.getElementById('conn-dot').style.background = ok ? 'var(--accent)' : 'var(--warn)';
+  document.getElementById('conn-label').textContent = ok ? 'connected' : 'disconnected';
+}
+
+/* ════════════════════════════════════════
+   USERS
+════════════════════════════════════════ */
+function renderUsers() {
+  const list = document.getElementById('users-list');
+  list.innerHTML = '';
+  // add self
+  const selfPill = makePill(myName, myColor, true);
+  list.appendChild(selfPill);
+  Object.values(users).forEach(u => {
+    list.appendChild(makePill(u.name, u.color, false));
+  });
+}
+
+function makePill(name, color, isYou) {
+  const pill = document.createElement('div');
+  pill.className = 'user-pill';
+  pill.innerHTML = `<div class="user-dot" style="background:${color}"></div>${name}${isYou?' <span style="color:var(--muted);font-size:.7rem">(you)</span>':''}`;
+  return pill;
+}
+
+/* ════════════════════════════════════════
+   TYPING
+════════════════════════════════════════ */
+function notifyTyping() {
+  if (!socket) return;
+  clearTimeout(typingTimer);
+  socket.emit('typing', { room: myRoom, name: myName });
+  typingTimer = setTimeout(() => {}, 1000);
+}
+
+/* ════════════════════════════════════════
+   RUN CODE (Judge0)
+════════════════════════════════════════ */
+async function runCode() {
+  const btn = document.getElementById('run-btn');
+  btn.classList.add('loading');
+  btn.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" fill="none" opacity=".3"/><path d="M8 2a6 6 0 0 1 6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" from="0 8 8" to="360 8 8" dur=".7s" repeatCount="indefinite"/></path></svg> Running…`;
+
+  const f = activeFile();
+  const lang = (f && f.lang) || document.getElementById('lang-select').value;
+  const code = editor.getValue();
+  const stdin = document.getElementById('stdin-input').value;
+  const langId = LANG_MAP[lang].id;
+
+  setBadge('run', 'Running');
+  setOutput('', false);
+
+  try {
+    // Submit
+    const submitRes = await fetch(`${JUDGE0_URL}/submissions?base64_encoded=false&wait=true`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ language_id: langId, source_code: code, stdin }),
+    });
+    const result = await submitRes.json();
+    const output = result.stdout || '';
+    const error  = result.stderr || result.compile_output || '';
+    const time   = result.time;
+    const status = result.status?.description || 'Unknown';
+
+    displayOutput(output, error, time, status);
+
+    // Broadcast to room
+    if (socket) socket.emit('run-output', { room: myRoom, output, error, time, status });
+
+  } catch (e) {
+    setOutput(`⚠ Could not reach Judge0 at ${JUDGE0_URL}\n\nMake sure Judge0 is running locally.\n\n${e.message}`, true);
+    setBadge('err', 'Error');
+  }
+
+  btn.classList.remove('loading');
+  btn.innerHTML = `<svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 2l10 6-10 6V2z"/></svg> Run`;
+}
+
+function displayOutput(output, error, time, status) {
+  const box = document.getElementById('output-box');
+  box.innerHTML = '';
+
+  if (time) {
+    const info = document.createElement('div');
+    info.className = 'out-info';
+    info.textContent = `⏱ ${status}  •  ${time}s\n`;
+    box.appendChild(info);
+  }
+
+  if (output) {
+    const out = document.createElement('div');
+    out.className = 'out-success';
+    out.textContent = output;
+    box.appendChild(out);
+  }
+
+  if (error) {
+    const err = document.createElement('div');
+    err.className = 'out-error';
+    err.textContent = error;
+    box.appendChild(err);
+  }
+
+  const isOk = !error && (status === 'Accepted' || status === 'Finished');
+  setBadge(isOk ? 'ok' : 'err', status || (error ? 'Error' : 'OK'));
+}
+
+function setOutput(text, isError) {
+  const box = document.getElementById('output-box');
+  box.innerHTML = '';
+  if (text) {
+    const el = document.createElement('div');
+    el.className = isError ? 'out-error' : 'out-success';
+    el.textContent = text;
+    box.appendChild(el);
+  }
+}
+
+function setBadge(type, label) {
+  const badge = document.getElementById('status-badge');
+  badge.className = 'status-badge ' + type;
+  badge.textContent = label;
+}
+
+function clearOutput() {
+  document.getElementById('output-box').innerHTML = '';
+  document.getElementById('status-badge').className = 'status-badge';
+  document.getElementById('status-badge').textContent = '';
+}
+
+/* ════════════════════════════════════════
+   CHAT
+════════════════════════════════════════ */
+function chatKey(e) { if (e.key === 'Enter') sendChat(); }
+
+function sendChat() {
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+  appendChat({ name: myName, color: myColor, text, time });
+  if (socket) socket.emit('chat-message', { room: myRoom, name: myName, color: myColor, text, time });
+}
+
+function appendChat({ name, color, text, time, system }) {
+  const msgs = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = 'msg';
+  if (system) {
+    div.innerHTML = `<div class="msg-body" style="color:var(--muted);font-size:.78rem;font-style:italic">${text}</div>`;
+  } else {
+    div.innerHTML = `
+      <div class="msg-meta">
+        <span class="msg-name" style="color:${color}">${name}</span>
+        <span class="msg-time">${time || ''}</span>
+      </div>
+      <div class="msg-body">${escapeHtml(text)}</div>`;
+  }
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* ════════════════════════════════════════
+   MISC
+════════════════════════════════════════ */
+function copyRoom() {
+  navigator.clipboard.writeText(myRoom).then(() => toast('Room ID copied!'));
+}
+
+function toggleStdin() {
+  const box = document.getElementById('stdin-box');
+  const hdr = document.getElementById('stdin-header');
+  const open = box.style.display === 'block';
+  box.style.display = open ? 'none' : 'block';
+  hdr.textContent = (open ? '▸' : '▾') + ' stdin (optional)';
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// press enter on splash
+document.getElementById('name-input')?.addEventListener('keydown', e => { if(e.key==='Enter') joinRoom(); });
+document.getElementById('room-input')?.addEventListener('keydown', e => { if(e.key==='Enter') joinRoom(); });
+
+/* ════════════════════════════════════════
+   SAVE / EXPORT
+════════════════════════════════════════ */
+function openSaveModal() {
+  // Sync current editor content to active file
+  const cur = activeFile();
+  if (cur && editor) cur.content = editor.getValue();
+
+  // Populate file picker
+  const picker = document.getElementById('save-file-picker');
+  picker.innerHTML = '';
+  files.forEach(f => {
+    const opt = document.createElement('option');
+    opt.value = f.id;
+    opt.textContent = f.name;
+    if (f.id === activeFileId) opt.selected = true;
+    picker.appendChild(opt);
+  });
+
+  // Pre-fill email subject
+  const af = activeFile();
+  if (af) {
+    document.getElementById('email-subject-input').value = `${af.name} from LivScriptz`;
+  }
+
+  // Reset sub-forms
+  document.getElementById('email-sub-form').classList.remove('open');
+  document.getElementById('drive-sub-form').classList.remove('open');
+
+  document.getElementById('save-modal-overlay').classList.add('open');
+}
+
+function closeSaveModal() {
+  document.getElementById('save-modal-overlay').classList.remove('open');
+}
+
+function closeSaveModalOutside(e) {
+  if (e.target === document.getElementById('save-modal-overlay')) closeSaveModal();
+}
+
+function getSelectedFile() {
+  const picker = document.getElementById('save-file-picker');
+  const id = picker.value;
+  return files.find(f => f.id === id) || activeFile();
+}
+
+// 1. Download
+function downloadFile() {
+  const f = getSelectedFile();
+  if (!f) return toast('No file to download');
+  const blob = new Blob([f.content], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = f.name;
+  a.click();
+  URL.revokeObjectURL(url);
+  closeSaveModal();
+  toast(`✓ ${f.name} downloaded!`);
+}
+
+// 2. Google Drive upload via Google Picker + Drive API (OAuth2 implicit flow)
+async function uploadToDrive() {
+  const f = getSelectedFile();
+  if (!f) return toast('No file to upload');
+
+  const CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID'; // Replace with your Google OAuth Client ID
+  const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+
+  // Open OAuth popup
+  const authUrl = `https://accounts.google.com/o/oauth2/auth?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(window.location.origin + '/oauth-callback')}&response_type=token&scope=${encodeURIComponent(SCOPE)}`;
+
+  const popup = window.open(authUrl, 'google-auth', 'width=500,height=600');
+
+  // Listen for token from popup (requires oauth-callback page on same origin)
+  window._driveAuthResolve = async (token) => {
+    popup && popup.close();
+    try {
+      const metadata = { name: f.name, mimeType: 'text/plain' };
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+      form.append('file', new Blob([f.content], { type: 'text/plain' }));
+
+      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const data = await res.json();
+      if (data.id) {
+        closeSaveModal();
+        toast(`✓ ${f.name} uploaded to Google Drive!`);
+      } else {
+        toast('Drive upload failed. Check your OAuth setup.');
+      }
+    } catch (err) {
+      toast('Drive upload error: ' + err.message);
+    }
+  };
+
+  // Fallback notice if Client ID not configured
+  if (CLIENT_ID === 'YOUR_GOOGLE_CLIENT_ID') {
+    popup && popup.close();
+    toast('⚠ Set your Google Client ID in the code to enable Drive upload');
+    return;
+  }
+}
+
+function toggleDriveForm() {
+  const form = document.getElementById('drive-sub-form');
+  const emailForm = document.getElementById('email-sub-form');
+  emailForm.classList.remove('open');
+  form.classList.toggle('open');
+}
+
+// 3. Email via mailto
+function toggleEmailForm() {
+  const form = document.getElementById('email-sub-form');
+  const driveForm = document.getElementById('drive-sub-form');
+  driveForm.classList.remove('open');
+  form.classList.toggle('open');
+  if (form.classList.contains('open')) {
+    const f = getSelectedFile();
+    if (f) document.getElementById('email-subject-input').value = `${f.name} from LivScriptz`;
+  }
+}
+
+function sendViaEmail() {
+  const f = getSelectedFile();
+  if (!f) return toast('No file selected');
+
+  const to = document.getElementById('email-to-input').value.trim();
+  const subject = document.getElementById('email-subject-input').value.trim() || `${f.name} from LivScriptz`;
+  const body = `Hi,\n\nHere is the code file "${f.name}" from our LivScriptz session:\n\n---\n${f.content}\n---\n\nShared via LivScriptz Collaborative Playground.`;
+
+  const mailtoLink = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  window.open(mailtoLink, '_self');
+  closeSaveModal();
+  toast('✓ Email client opened!');
+}
+
+// Keyboard shortcut: Ctrl+S / Cmd+S → quick download
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    if (document.getElementById('app').style.display !== 'none' && document.getElementById('app').style.display !== '') {
+      openSaveModal();
+    }
+  }
+});
+</script>
+</body>
+</html>
