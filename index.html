@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>CodeSync – Collaborative Playground</title>
+  <title>LivScriptz - Collaborative Playground</title>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css"/>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css"/>
@@ -47,6 +47,7 @@
       font-weight: 800;
       letter-spacing: -1px;
       background: linear-gradient(120deg, var(--accent), var(--accent2));
+      background-clip: text;
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
@@ -97,7 +98,7 @@
       background: var(--surface);
       flex-shrink: 0;
     }
-    .logo { font-weight: 800; font-size: 1.1rem; background: linear-gradient(120deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
+    .logo { font-weight: 800; font-size: 1.1rem; background: linear-gradient(120deg, var(--accent), var(--accent2)); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.5px; }
     .room-badge {
       background: var(--panel); border: 1px solid var(--border);
       padding: 4px 12px; border-radius: 20px;
@@ -447,7 +448,7 @@
   <div class="splash-card">
     <div>
       <label>Your Name</label>
-      <input id="name-input" placeholder="e.g. Alice" maxlength="24"/>
+      <input id="name-input" placeholder="e.g. DAKSH" maxlength="24"/>
     </div>
     <div>
       <label>Room ID</label>
@@ -493,8 +494,10 @@
   <!-- USERS -->
   <div id="users-strip">
     <span class="users-label">Online</span>
-    <div id="users-list"></div>
-    <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+    <div id="users-list" style="display:flex; flex-direction:row; align-items:center; gap:8px; flex-wrap:nowrap;"></div>
+    <!--<div id="users-list"></div> -->
+
+     <div style="margin-left:auto;display: flex; align-items: center; gap: 6px;">
       <div class="status-dot" id="conn-dot"></div>
       <span style="font-size:.72rem;color:var(--muted)" id="conn-label">connected</span>
     </div>
@@ -582,10 +585,10 @@
         </div>
       </button>
       <div id="drive-sub-form">
-        <p>Click below to sign in with Google and upload your file to Drive. You'll be redirected to the Google auth page.</p>
+        <p>Downloads your file, then gives you a link to open Google Drive in a new tab.</p>
         <button id="drive-connect-btn" onclick="uploadToDrive()">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6.28 3l5.72 9.9L6.72 21H2l5.72-9.9L2 3h4.28zm5.44 0h4.28l5.72 18h-4.28L11.72 3zm4.28 0L16 12.1 10.28 21H6l5.72-9.9L16 3z"/></svg>
-          Sign in & Upload to Drive
+          Download &amp; Get Drive Link
         </button>
       </div>
 
@@ -613,14 +616,14 @@
 <div id="toast"></div>
 
 <script>
-/* ════════════════════════════════════════
-   STATE
-════════════════════════════════════════ */
+/* ═══════════════════ STATE ═══════════════════ */
 let socket, editor, myName, myRoom, myColor;
 let suppressSync = false;
 let typingTimer;
 let users = {}; // socketId -> { name, color }
-const JUDGE0_URL = 'http://localhost:2358'; // local Judge0
+
+// Credentials live in server.js only — never put them here
+const JDOODLE_PROXY = '/api/execute';
 
 // ── MULTI-FILE STATE ──
 let files = [];        // [{ id, name, lang, content }]
@@ -630,11 +633,11 @@ let fileCounter = 0;
 function newFileId() { return 'f' + (++fileCounter); }
 
 const LANG_MAP = {
-  javascript: { id: 63, file: 'main.js',  mode: 'javascript' },
-  python:     { id: 71, file: 'main.py',  mode: 'python' },
-  cpp:        { id: 54, file: 'main.cpp', mode: 'text/x-c++src' },
-  java:       { id: 62, file: 'Main.java',mode: 'text/x-java' },
-  c:          { id: 50, file: 'main.c',   mode: 'text/x-csrc' },
+  javascript: { lang: 'nodejs',  version: '0', file: 'main.js',   mode: 'javascript' },
+  python:     { lang: 'python3', version: '0', file: 'main.py',   mode: 'python' },
+  cpp:        { lang: 'cpp',     version: '0', file: 'main.cpp',  mode: 'text/x-c++src' },
+  java:       { lang: 'java',    version: '0', file: 'Main.java', mode: 'text/x-java' },
+  c:          { lang: 'c',       version: '0', file: 'main.c',    mode: 'text/x-csrc' },
 };
 
 const STARTER = {
@@ -648,9 +651,7 @@ const STARTER = {
 const COLORS = ['#00e5a0','#7c6fff','#ff6b6b','#ffd166','#06d6a0','#ef8a17','#a8dadc','#f72585'];
 let colorIdx = 0;
 
-/* ════════════════════════════════════════
-   SPLASH
-════════════════════════════════════════ */
+/* ═════════════════ SPLASH ════════════════════ */
 function genRoom() {
   const id = Math.random().toString(36).slice(2,8).toUpperCase();
   document.getElementById('room-input').value = id;
@@ -668,9 +669,7 @@ function joinRoom() {
   initSocket();
 }
 
-/* ════════════════════════════════════════
-   EDITOR + FILE SYSTEM
-════════════════════════════════════════ */
+/* ════════════════════ EDITOR + FILE SYSTEM ═══════════════ */
 function initEditor() {
   editor = CodeMirror(document.getElementById('editor-container'), {
     value: '',
@@ -805,16 +804,28 @@ function changeLang() {
   if (socket) socket.emit('lang-change', { room: myRoom, lang, fileId: activeFileId, fileName: f.name });
 }
 
-/* ════════════════════════════════════════
-   SOCKET
-════════════════════════════════════════ */
+/* ═══════════════════ SOCKET ══════════════════ */
 function initSocket() {
   if (window._socketMissing) {
     setConnStatus(false);
     toast('Socket.io not found – running in offline mode');
     return;
   }
-  socket = io({ transports: ['websocket'] });
+  //socket = io({ transports: ['websocket'] });
+
+  const serverURL = (() => {
+  const host = window.location.hostname;
+  const port = 3000;
+  if (host === 'localhost' || host === '127.0.0.1') {
+    return 'http://localhost:' + port;
+  } else if (/^192\.168\.|^10\.|^172\./.test(host)) {
+    return 'http://' + host + ':' + port;
+  } else {
+    return window.location.origin; // ngrok URL
+  }
+})();
+
+socket = io(serverURL, { transports: ['websocket'] });
 
   socket.on('connect', () => {
     setConnStatus(true);
@@ -940,9 +951,7 @@ function setConnStatus(ok) {
   document.getElementById('conn-label').textContent = ok ? 'connected' : 'disconnected';
 }
 
-/* ════════════════════════════════════════
-   USERS
-════════════════════════════════════════ */
+/* ════════════════ USERS ══════════════════ */
 function renderUsers() {
   const list = document.getElementById('users-list');
   list.innerHTML = '';
@@ -961,9 +970,7 @@ function makePill(name, color, isYou) {
   return pill;
 }
 
-/* ════════════════════════════════════════
-   TYPING
-════════════════════════════════════════ */
+/* ══════════════ TYPING ═════════════════════ */
 function notifyTyping() {
   if (!socket) return;
   clearTimeout(typingTimer);
@@ -971,9 +978,7 @@ function notifyTyping() {
   typingTimer = setTimeout(() => {}, 1000);
 }
 
-/* ════════════════════════════════════════
-   RUN CODE (Judge0)
-════════════════════════════════════════ */
+/* ══════════════════ RUN CODE (JDoodle) ═══════════════════ */
 async function runCode() {
   const btn = document.getElementById('run-btn');
   btn.classList.add('loading');
@@ -982,32 +987,46 @@ async function runCode() {
   const f = activeFile();
   const lang = (f && f.lang) || document.getElementById('lang-select').value;
   const code = editor.getValue();
-  const stdin = document.getElementById('stdin-input').value;
-  const langId = LANG_MAP[lang].id;
+  const stdin = document.getElementById('stdin-input').value || '';
+
+  const config = LANG_MAP[lang];
 
   setBadge('run', 'Running');
   setOutput('', false);
 
   try {
-    // Submit
-    const submitRes = await fetch(`${JUDGE0_URL}/submissions?base64_encoded=false&wait=true`, {
+    const response = await fetch(JDOODLE_PROXY, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ language_id: langId, source_code: code, stdin }),
+      body: JSON.stringify({
+        // No credentials here — server.js adds them before sending to JDoodle
+        script:       code,
+        stdin:        stdin,
+        language:     config.lang,
+        versionIndex: config.version,
+        compileOnly:  false
+      })
     });
-    const result = await submitRes.json();
-    const output = result.stdout || '';
-    const error  = result.stderr || result.compile_output || '';
-    const time   = result.time;
-    const status = result.status?.description || 'Unknown';
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const result = await response.json();
+
+    const output = result.output || '';
+    const error  = result.error || result.compileOutput || '';  // JDoodle uses different field names sometimes
+    const time   = result.cpuTime || result.memory || 'N/A';
+    const status = error ? 'Error' : 'Success';
 
     displayOutput(output, error, time, status);
 
-    // Broadcast to room
+    // Broadcast to room (same as before)
     if (socket) socket.emit('run-output', { room: myRoom, output, error, time, status });
 
   } catch (e) {
-    setOutput(`⚠ Could not reach Judge0 at ${JUDGE0_URL}\n\nMake sure Judge0 is running locally.\n\n${e.message}`, true);
+    console.error(e);
+    setOutput(`⚠ Could not reach JDoodle\nMake sure server is running and credentials are correct.\n\n${e.message}`, true);
     setBadge('err', 'Error');
   }
 
@@ -1067,9 +1086,7 @@ function clearOutput() {
   document.getElementById('status-badge').textContent = '';
 }
 
-/* ════════════════════════════════════════
-   CHAT
-════════════════════════════════════════ */
+/* ══════════════════ CHAT ═══════════════════ */
 function chatKey(e) { if (e.key === 'Enter') sendChat(); }
 
 function sendChat() {
@@ -1104,9 +1121,7 @@ function escapeHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-/* ════════════════════════════════════════
-   MISC
-════════════════════════════════════════ */
+/* ════════════════════ MISC ══════════════════ */
 function copyRoom() {
   navigator.clipboard.writeText(myRoom).then(() => toast('Room ID copied!'));
 }
@@ -1130,9 +1145,7 @@ function toast(msg) {
 document.getElementById('name-input')?.addEventListener('keydown', e => { if(e.key==='Enter') joinRoom(); });
 document.getElementById('room-input')?.addEventListener('keydown', e => { if(e.key==='Enter') joinRoom(); });
 
-/* ════════════════════════════════════════
-   SAVE / EXPORT
-════════════════════════════════════════ */
+/* ═══════════════════ SAVE / EXPORT ════════════════════ */
 function openSaveModal() {
   // Sync current editor content to active file
   const cur = activeFile();
@@ -1196,46 +1209,28 @@ async function uploadToDrive() {
   const f = getSelectedFile();
   if (!f) return toast('No file to upload');
 
-  const CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID'; // Replace with your Google OAuth Client ID
-  const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+  // Download the file
+  const blob = new Blob([f.content], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = f.name;
+  a.click();
+  URL.revokeObjectURL(url);
 
-  // Open OAuth popup
-  const authUrl = `https://accounts.google.com/o/oauth2/auth?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(window.location.origin + '/oauth-callback')}&response_type=token&scope=${encodeURIComponent(SCOPE)}`;
-
-  const popup = window.open(authUrl, 'google-auth', 'width=500,height=600');
-
-  // Listen for token from popup (requires oauth-callback page on same origin)
-  window._driveAuthResolve = async (token) => {
-    popup && popup.close();
-    try {
-      const metadata = { name: f.name, mimeType: 'text/plain' };
-      const form = new FormData();
-      form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-      form.append('file', new Blob([f.content], { type: 'text/plain' }));
-
-      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-      const data = await res.json();
-      if (data.id) {
-        closeSaveModal();
-        toast(`✓ ${f.name} uploaded to Google Drive!`);
-      } else {
-        toast('Drive upload failed. Check your OAuth setup.');
-      }
-    } catch (err) {
-      toast('Drive upload error: ' + err.message);
-    }
-  };
-
-  // Fallback notice if Client ID not configured
-  if (CLIENT_ID === 'YOUR_GOOGLE_CLIENT_ID') {
-    popup && popup.close();
-    toast('⚠ Set your Google Client ID in the code to enable Drive upload');
-    return;
-  }
+  // Replace sub-form content with a clickable Drive link (avoids iframe block)
+  const driveForm = document.getElementById('drive-sub-form');
+  driveForm.innerHTML = `
+    <p style="color:var(--accent);font-size:.82rem;">✓ <strong>${f.name}</strong> downloaded!</p>
+    <p style="font-size:.82rem;color:var(--muted);line-height:1.6;">Now open Google Drive and drag the file in:</p>
+    <a href="https://drive.google.com/drive/my-drive" target="_blank" rel="noopener"
+       style="display:flex;align-items:center;justify-content:center;gap:8px;
+              background:#4285f4;color:#fff;font-family:var(--font-ui);font-weight:700;
+              font-size:.88rem;border-radius:8px;padding:10px 16px;text-decoration:none;">
+      Open Google Drive ↗
+    </a>
+    <p style="font-size:.72rem;color:var(--muted);">Drag &amp; drop the downloaded file into Drive.</p>
+  `;
 }
 
 function toggleDriveForm() {
@@ -1265,10 +1260,10 @@ function sendViaEmail() {
   const subject = document.getElementById('email-subject-input').value.trim() || `${f.name} from LivScriptz`;
   const body = `Hi,\n\nHere is the code file "${f.name}" from our LivScriptz session:\n\n---\n${f.content}\n---\n\nShared via LivScriptz Collaborative Playground.`;
 
-  const mailtoLink = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  window.open(mailtoLink, '_self');
+  const gmailUrl = `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  window.open(gmailUrl, '_blank');
   closeSaveModal();
-  toast('✓ Email client opened!');
+  toast('✓ Gmail opened in new tab!');
 }
 
 // Keyboard shortcut: Ctrl+S / Cmd+S → quick download
